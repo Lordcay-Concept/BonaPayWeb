@@ -27,26 +27,49 @@ export async function middleware(request: NextRequest) {
   )
 
   const { data: { user } } = await supabase.auth.getUser()
+  
+  // Get user role if logged in
+  let userRole = null
+  if (user) {
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('role')
+      .eq('id', user.id)
+      .single()
+    userRole = profile?.role
+  }
 
-  // Protected routes that require authentication
-  const protectedRoutes = ['/dashboard', '/transfer', '/transactions', '/profile', '/admin', '/cards', '/bills', '/savings', '/security']
-  const isProtectedRoute = protectedRoutes.some((route: string) => 
+  // Protected routes that require authentication AND admin role
+  const adminOnlyRoutes = ['/admin', '/dashboard', '/transfer', '/transactions', '/profile', '/cards', '/bills', '/savings', '/security']
+  const isAdminRoute = adminOnlyRoutes.some((route: string) => 
     request.nextUrl.pathname.startsWith(route)
   )
 
-  // Auth routes (redirect to dashboard if already logged in)
+  // Auth routes (redirect to dashboard if already logged in as admin)
   const authRoutes = ['/login', '/signup', '/forgot-password']
   const isAuthRoute = authRoutes.some((route: string) => 
     request.nextUrl.pathname === route
   )
 
-  if (isProtectedRoute && !user) {
+  // Block regular users from accessing web routes
+  if (isAdminRoute && user) {
+    if (userRole !== 'admin') {
+      // Regular user trying to access web - redirect to download page
+      const downloadUrl = new URL('/download-app', request.url)
+      downloadUrl.searchParams.set('message', 'web_access_denied')
+      return NextResponse.redirect(downloadUrl)
+    }
+  }
+
+  // Redirect to login if not authenticated on admin routes
+  if (isAdminRoute && !user) {
     const redirectUrl = new URL('/login', request.url)
     redirectUrl.searchParams.set('redirectedFrom', request.nextUrl.pathname)
     return NextResponse.redirect(redirectUrl)
   }
 
-  if (isAuthRoute && user) {
+  // Redirect admin to dashboard if trying to access auth routes
+  if (isAuthRoute && user && userRole === 'admin') {
     return NextResponse.redirect(new URL('/dashboard', request.url))
   }
 

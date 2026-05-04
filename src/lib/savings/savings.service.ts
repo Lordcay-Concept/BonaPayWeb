@@ -177,7 +177,7 @@ export class SavingsService {
       // Create notification
       await this.createSavingsNotification(userId, product.name, params.amount, 'created')
 
-      // Calculate interest daily (will be handled by a cron job in production)
+      // Calculate interest daily 
       await this.calculateInterest(userId, savings.id)
 
       return { success: true, data: savings }

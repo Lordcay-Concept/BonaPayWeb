@@ -10,8 +10,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Shield, Smartphone, Key, Copy, Check, AlertCircle, Eye, EyeOff } from 'lucide-react'
+import { Shield, Smartphone, Key, Copy, Check, Eye, EyeOff } from 'lucide-react'
 import {
   Dialog,
   DialogContent,
@@ -19,11 +18,11 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from '@/components/ui/dialog'
 
 export default function SecurityPage() {
   const router = useRouter()
+  const [activeTab, setActiveTab] = useState('authentication')
   const [user, setUser] = useState<any>(null)
   const [profile, setProfile] = useState<any>(null)
   const [twoFactorEnabled, setTwoFactorEnabled] = useState(false)
@@ -173,6 +172,11 @@ export default function SecurityPage() {
     setTimeout(() => setCopied(false), 2000)
   }
 
+  const tabs = [
+    { id: 'authentication', label: 'Authentication', icon: Shield },
+    { id: 'devices', label: 'Devices & Sessions', icon: Smartphone },
+  ]
+
   return (
     <DashboardLayout>
       <div className="max-w-4xl mx-auto space-y-6 animate-fade-in">
@@ -183,13 +187,29 @@ export default function SecurityPage() {
           </p>
         </div>
 
-        <Tabs defaultValue="authentication" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-2 lg:w-[400px]">
-            <TabsTrigger value="authentication">Authentication</TabsTrigger>
-            <TabsTrigger value="devices">Devices & Sessions</TabsTrigger>
-          </TabsList>
+        {/* Horizontal Tab Navigation */}
+        <div className="border-b border-slate-200 dark:border-slate-700">
+          <div className="flex gap-6">
+            {tabs.map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={`px-4 py-2 text-sm font-medium transition-all border-b-2 flex items-center gap-2 ${
+                  activeTab === tab.id 
+                    ? 'border-blue-600 text-blue-600 dark:border-blue-400 dark:text-blue-400' 
+                    : 'border-transparent text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-300'
+                }`}
+              >
+                <tab.icon className="h-4 w-4" />
+                {tab.label}
+              </button>
+            ))}
+          </div>
+        </div>
 
-          <TabsContent value="authentication" className="space-y-6">
+        {/* Authentication Content */}
+        {activeTab === 'authentication' && (
+          <div className="space-y-6">
             {/* Two-Factor Authentication Card */}
             <Card>
               <CardHeader>
@@ -338,141 +358,123 @@ export default function SecurityPage() {
                 </CardContent>
               )}
             </Card>
+          </div>
+        )}
 
-            {/* Active Sessions Card */}
-            <Card>
-              <CardHeader>
-                <div className="flex items-center gap-3">
-                  <div className="p-2 bg-slate-100 dark:bg-slate-800 rounded-lg">
-                    <Smartphone className="h-5 w-5" />
-                  </div>
+        {/* Devices & Sessions Content */}
+        {activeTab === 'devices' && (
+          <Card>
+            <CardHeader>
+              <CardTitle>Trusted Devices</CardTitle>
+              <CardDescription>
+                Devices that have been trusted to bypass 2FA
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-3">
+                <div className="flex items-center justify-between p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg">
                   <div>
-                    <CardTitle>Active Sessions</CardTitle>
-                    <CardDescription>
-                      Manage devices where you're logged in
-                    </CardDescription>
+                    <p className="font-medium">Current Session</p>
+                    <p className="text-xs text-slate-500">Chrome on Windows • {new Date().toLocaleDateString()}</p>
                   </div>
+                  <span className="text-xs text-green-600">Current</span>
                 </div>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg">
-                    <div>
-                      <p className="font-medium">Current Session</p>
-                      <p className="text-xs text-slate-500">Chrome on Windows • {new Date().toLocaleDateString()}</p>
-                    </div>
-                    <span className="text-xs text-green-600">Current</span>
-                  </div>
-                  <Button variant="outline" className="w-full" size="sm">
-                    Log Out All Other Devices
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          <TabsContent value="devices">
-            <Card>
-              <CardHeader>
-                <CardTitle>Trusted Devices</CardTitle>
-                <CardDescription>
-                  Devices that have been trusted to bypass 2FA
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="text-center py-8 text-slate-500">
-                  <Smartphone className="h-12 w-12 mx-auto mb-3 opacity-50" />
-                  <p>No trusted devices</p>
-                  <p className="text-sm">When you sign in with 2FA, you can trust the device for 30 days.</p>
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
-        </Tabs>
-
-        {/* 2FA Setup Dialog */}
-        <Dialog open={showSetup} onOpenChange={setShowSetup}>
-          <DialogContent className="max-w-md">
-            <DialogHeader>
-              <DialogTitle>Setup Two-Factor Authentication</DialogTitle>
-              <DialogDescription>
-                Scan the QR code with Google Authenticator or Authy
-              </DialogDescription>
-            </DialogHeader>
-            <div className="space-y-4">
-              {setupData && (
-                <>
-                  <div className="flex justify-center">
-                    <img
-                      src={setupData.qrCode}
-                      alt="2FA QR Code"
-                      className="w-48 h-48"
-                    />
-                  </div>
-                  <div className="bg-slate-100 dark:bg-slate-800 p-3 rounded-lg">
-                    <p className="text-xs font-mono text-center break-all">
-                      {setupData.secret}
-                    </p>
-                    <button
-                      onClick={() => copyToClipboard(setupData.secret)}
-                      className="flex items-center justify-center gap-1 w-full mt-2 text-xs text-blue-600"
-                    >
-                      {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
-                      {copied ? 'Copied!' : 'Copy secret key'}
-                    </button>
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Verification Code</Label>
-                    <Input
-                      placeholder="000000"
-                      maxLength={6}
-                      value={verificationCode}
-                      onChange={(e) => setVerificationCode(e.target.value)}
-                    />
-                  </div>
-                </>
-              )}
-            </div>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setShowSetup(false)}>
-                Cancel
-              </Button>
-              <Button onClick={handleEnable2FA} disabled={loading}>
-                Verify & Enable
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-
-        {/* Recovery Codes Dialog */}
-        <Dialog open={showRecoveryCodes} onOpenChange={setShowRecoveryCodes}>
-          <DialogContent className="max-w-md">
-            <DialogHeader>
-              <DialogTitle>Recovery Codes</DialogTitle>
-              <DialogDescription>
-                Save these recovery codes in a safe place. Each code can be used once.
-              </DialogDescription>
-            </DialogHeader>
-            <div className="bg-slate-100 dark:bg-slate-800 p-4 rounded-lg">
-              <div className="grid grid-cols-2 gap-2">
-                {recoveryCodes.map((code, index) => (
-                  <code key={index} className="text-sm font-mono">{code}</code>
-                ))}
+                <Button variant="outline" className="w-full" size="sm">
+                  Log Out All Other Devices
+                </Button>
               </div>
-            </div>
-            <DialogFooter>
-              <Button
-                onClick={() => {
-                  copyToClipboard(recoveryCodes.join('\n'))
-                  setShowRecoveryCodes(false)
-                }}
-              >
-                I've Saved These Codes
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+              <div className="text-center py-8 text-slate-500 mt-4">
+                <Smartphone className="h-12 w-12 mx-auto mb-3 opacity-50" />
+                <p>No trusted devices</p>
+                <p className="text-sm">When you sign in with 2FA, you can trust the device for 30 days.</p>
+              </div>
+            </CardContent>
+          </Card>
+        )}
       </div>
+
+      {/* 2FA Setup Dialog */}
+      <Dialog open={showSetup} onOpenChange={setShowSetup}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Setup Two-Factor Authentication</DialogTitle>
+            <DialogDescription>
+              Scan the QR code with Google Authenticator or Authy
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            {setupData && (
+              <>
+                <div className="flex justify-center">
+                  <img
+                    src={setupData.qrCode}
+                    alt="2FA QR Code"
+                    className="w-48 h-48"
+                  />
+                </div>
+                <div className="bg-slate-100 dark:bg-slate-800 p-3 rounded-lg">
+                  <p className="text-xs font-mono text-center break-all">
+                    {setupData.secret}
+                  </p>
+                  <button
+                    onClick={() => copyToClipboard(setupData.secret)}
+                    className="flex items-center justify-center gap-1 w-full mt-2 text-xs text-blue-600"
+                  >
+                    {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+                    {copied ? 'Copied!' : 'Copy secret key'}
+                  </button>
+                </div>
+                <div className="space-y-2">
+                  <Label>Verification Code</Label>
+                  <Input
+                    placeholder="000000"
+                    maxLength={6}
+                    value={verificationCode}
+                    onChange={(e) => setVerificationCode(e.target.value)}
+                  />
+                </div>
+              </>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowSetup(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleEnable2FA} disabled={loading}>
+              Verify & Enable
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Recovery Codes Dialog */}
+      <Dialog open={showRecoveryCodes} onOpenChange={setShowRecoveryCodes}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Recovery Codes</DialogTitle>
+            <DialogDescription>
+              Save these recovery codes in a safe place. Each code can be used once.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="bg-slate-100 dark:bg-slate-800 p-4 rounded-lg">
+            <div className="grid grid-cols-2 gap-2">
+              {recoveryCodes.map((code, index) => (
+                <code key={index} className="text-sm font-mono">{code}</code>
+              ))}
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              onClick={() => {
+                copyToClipboard(recoveryCodes.join('\n'))
+                setShowRecoveryCodes(false)
+              }}
+            >
+              I've Saved These Codes
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </DashboardLayout>
   )
 }

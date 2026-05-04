@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { useForm } from 'react-hook-form'
@@ -8,11 +8,13 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import toast from 'react-hot-toast'
 import { signupSchema } from '@/lib/validations'
 import { authService } from '@/lib/auth/auth.service'
+import { getSupabaseClient } from '@/lib/supabase/client'
+import { emailApprovalService } from '@/lib/admin/email-approval.service'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
-import { Mail, Lock, User, Phone, ArrowRight, Shield, Eye, EyeOff } from 'lucide-react'
+import { Mail, Lock, User, Phone, ArrowRight, Shield, Eye, EyeOff, AlertCircle } from 'lucide-react'
 
 type SignupFormData = {
   fullName: string
@@ -27,42 +29,73 @@ export default function SignupPage() {
   const [isLoading, setIsLoading] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
   const [showConfirmPassword, setShowConfirmPassword] = useState(false)
+  const [isEmailApproved, setIsEmailApproved] = useState<boolean | null>(null)
+  const [isCheckingEmail, setIsCheckingEmail] = useState(false)
 
   const {
     register,
     handleSubmit,
     watch,
+    setValue,
     formState: { errors },
   } = useForm<SignupFormData>({
     resolver: zodResolver(signupSchema),
   })
 
   const password = watch('password')
+  const email = watch('email')
+
+  
+useEffect(() => {
+  const checkEmailApproval = async () => {
+    if (!email || !email.includes('@')) {
+      setIsEmailApproved(null)
+      return
+    }
+
+    setIsCheckingEmail(true)
+    
+
+    const isApproved = await emailApprovalService.isEmailApproved(email)
+    setIsEmailApproved(isApproved)
+    
+    setIsCheckingEmail(false)
+  }
+
+  const debounce = setTimeout(checkEmailApproval, 500)
+  return () => clearTimeout(debounce)
+}, [email])
 
   const onSubmit = async (data: SignupFormData) => {
-    setIsLoading(true)
-
-    try {
-      const result = await authService.signUp({
-        fullName: data.fullName,
-        email: data.email,
-        phone: data.phone,
-        password: data.password,
-        confirmPassword: data.confirmPassword,
-      })
-
-      if (result.success) {
-        toast.success('Account created successfully! Welcome to FintechFlow.')
-        router.push('/dashboard')
-      } else {
-        toast.error(result.error || 'Failed to create account')
-      }
-    } catch (error: any) {
-      toast.error(error.message || 'An error occurred')
-    } finally {
-      setIsLoading(false)
-    }
+ 
+  if (!isEmailApproved) {
+    toast.error('This email is not authorized for web registration.')
+    return
   }
+
+  setIsLoading(true)
+
+  try {
+    const result = await authService.signUp({
+      fullName: data.fullName,
+      email: data.email,
+      phone: data.phone,
+      password: data.password,
+      confirmPassword: data.confirmPassword,
+    })
+
+    if (result.success) {
+      toast.success('Account created successfully! Welcome to BonaPay Admin Portal.')
+      router.push('/dashboard')  
+    } else {
+      toast.error(result.error || 'Failed to create account')
+    }
+  } catch (error: any) {
+    toast.error(error.message || 'An error occurred')
+  } finally {
+    setIsLoading(false)
+  }
+}
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100 dark:from-slate-900 dark:to-slate-800 p-4">
@@ -73,14 +106,33 @@ export default function SignupPage() {
               <Shield className="h-8 w-8 text-blue-600" />
             </div>
           </div>
-          <CardTitle className="text-3xl font-bold">Create Account</CardTitle>
+          <CardTitle className="text-3xl font-bold">Admin Registration</CardTitle>
           <CardDescription>
-            Join FintechFlow and start your digital banking journey
+            Register for administrator access
           </CardDescription>
         </CardHeader>
         
         <form onSubmit={handleSubmit(onSubmit)}>
           <CardContent className="space-y-4">
+            {/* Email approval status indicator */}
+            {email && email.includes('@') && !isCheckingEmail && isEmailApproved === false && (
+              <div className="bg-red-50 dark:bg-red-950/30 p-3 rounded-lg flex items-start gap-2">
+                <AlertCircle className="h-4 w-4 text-red-600 mt-0.5 shrink-0" />
+                <p className="text-sm text-red-700 dark:text-red-300">
+                  This email is not authorized for web registration. Only pre-approved emails can create admin accounts.
+                </p>
+              </div>
+            )}
+
+            {email && email.includes('@') && !isCheckingEmail && isEmailApproved === true && (
+              <div className="bg-green-50 dark:bg-green-950/30 p-3 rounded-lg flex items-start gap-2">
+                <Shield className="h-4 w-4 text-green-600 mt-0.5 shrink-0" />
+                <p className="text-sm text-green-700 dark:text-green-300">
+                  ✓ Email verified. You can proceed with registration.
+                </p>
+              </div>
+            )}
+
             <div className="space-y-2">
               <Label htmlFor="fullName">Full Name</Label>
               <div className="relative">
@@ -98,7 +150,7 @@ export default function SignupPage() {
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="email">Email Address</Label>
+              <Label htmlFor="email">Email Address (Must be pre-approved)</Label>
               <div className="relative">
                 <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-slate-400" />
                 <Input
@@ -108,10 +160,18 @@ export default function SignupPage() {
                   className="pl-10"
                   {...register('email')}
                 />
+                {isCheckingEmail && (
+                  <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-500"></div>
+                  </div>
+                )}
               </div>
               {errors.email && (
                 <p className="text-sm text-red-500">{errors.email.message}</p>
               )}
+              <p className="text-xs text-slate-500">
+                Only pre-approved emails can register for administrator access.
+              </p>
             </div>
 
             <div className="space-y-2">
@@ -202,7 +262,12 @@ export default function SignupPage() {
           </CardContent>
 
           <CardFooter className="flex flex-col space-y-4">
-            <Button type="submit" className="w-full" size="lg" disabled={isLoading}>
+            <Button 
+              type="submit" 
+              className="w-full" 
+              size="lg" 
+              disabled={isLoading || isEmailApproved !== true}
+            >
               {isLoading ? (
                 <div className="flex items-center gap-2">
                   <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>

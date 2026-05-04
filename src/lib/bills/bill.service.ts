@@ -8,6 +8,54 @@ export interface BillCategory {
   icon: string
 }
 
+export interface ElectricityProvider {
+  id: string
+  name: string
+  code: string
+  region: string
+}
+
+export interface Network {
+  id: string
+  name: string
+  code: string
+  prefix_patterns: string[]
+  logo_url?: string
+}
+
+export interface DataBundle {
+  id: string
+  network_code: string
+  name: string
+  size_mb: number
+  price: number
+  validity_days: number
+}
+
+export interface CableProvider {
+  id: string
+  name: string
+  code: string
+  logo_url?: string
+}
+
+export interface CablePackage {
+  id: string
+  provider_code: string
+  name: string
+  price: number
+  channels?: number
+  description?: string
+}
+
+export interface BettingPlatform {
+  id: string
+  name: string
+  code: string
+  min_deposit: number
+  logo_url?: string
+}
+
 export interface ElectricityBill {
   meterNumber: string
   meterType: 'prepaid' | 'postpaid'
@@ -18,29 +66,40 @@ export interface ElectricityBill {
 export interface AirtimeBill {
   phoneNumber: string
   amount: number
-  network: 'mtn' | 'glo' | 'airtel' | '9mobile'
+  network: string
 }
 
 export interface DataBill {
   phoneNumber: string
   dataPlan: string
   amount: number
-  network: 'mtn' | 'glo' | 'airtel' | '9mobile'
+  network: string
 }
 
 export interface CableTVBill {
   smartCardNumber: string
   package: string
   amount: number
-  provider: 'dstv' | 'gotv' | 'startimes'
+  provider: string
+}
+
+export interface BettingBill {
+  platformCode: string
+  phoneNumber: string
+  amount: number
+}
+
+export interface AccountVerification {
+  accountNumber: string
+  bankCode?: string
 }
 
 export class BillService {
   private supabase = getSupabaseClient()
 
-  /**
-   * Get all bill categories
-   */
+  
+  // BILL CATEGORIES
+
   async getBillCategories(): Promise<BillCategory[]> {
     const { data, error } = await this.supabase
       .from('bill_categories')
@@ -52,16 +111,24 @@ export class BillService {
       console.error('Get categories error:', error)
       return []
     }
-
     return data || []
   }
 
-  /**
-   * Pay electricity bill
-   */
+  // ELECTRICITY SERVICES
+
+  async getElectricityProviders(): Promise<ElectricityProvider[]> {
+    const { data, error } = await this.supabase
+      .from('electricity_providers')
+      .select('*')
+      .eq('is_active', true)
+      .order('name')
+
+    if (error) return []
+    return data || []
+  }
+
   async payElectricity(userId: string, bill: ElectricityBill): Promise<{ success: boolean; reference?: string; error?: string }> {
     try {
-      // Check user balance
       const { data: account, error: accountError } = await this.supabase
         .from('accounts')
         .select('balance')
@@ -77,9 +144,8 @@ export class BillService {
       }
 
       const reference = generateTransactionReference()
-
-      // Deduct from balance
       const newBalance = account.balance - bill.amount
+
       const { error: updateError } = await this.supabase
         .from('accounts')
         .update({ balance: newBalance })
@@ -87,8 +153,7 @@ export class BillService {
 
       if (updateError) throw updateError
 
-      // Create transaction record
-      const { error: transactionError } = await this.supabase
+      await this.supabase
         .from('transactions')
         .insert({
           user_id: userId,
@@ -106,9 +171,6 @@ export class BillService {
           status: 'completed',
         })
 
-      if (transactionError) throw transactionError
-
-      // Create bill payment record
       await this.supabase
         .from('bill_payments')
         .insert({
@@ -123,7 +185,6 @@ export class BillService {
           metadata: { meter_type: bill.meterType },
         })
 
-      // Create notification
       await this.createBillNotification(userId, 'Electricity', bill.amount, reference)
 
       return { success: true, reference }
@@ -133,12 +194,54 @@ export class BillService {
     }
   }
 
-  /**
-   * Buy airtime
-   */
+  async verifyElectricityMeter(meterNumber: string, provider: string): Promise<{ success: boolean; customerName?: string; error?: string }> {
+    // Mock verification with Nigerian names
+    const mockNames = [
+      'Chief Adebayo Ogunlesi',
+      'Mrs. Funke Adeleke',
+      'Dr. Michael Okonkwo',
+      'Alhaji Musa Bello',
+      'Barr. Emeka Nwosu',
+      'Princess Tolu Adeyemi',
+      'Engr. Femi Akinwande',
+      'Mrs. Grace Uche',
+      'Mr. Peter Obi',
+      'Chief Mrs. Ngozi Okonjo',
+    ]
+    const randomName = mockNames[Math.floor(Math.random() * mockNames.length)]
+    
+    return {
+      success: true,
+      customerName: randomName,
+    }
+  }
+
+  // AIRTIME SERVICES
+
+  async getNetworks(): Promise<Network[]> {
+    const { data, error } = await this.supabase
+      .from('networks')
+      .select('*')
+      .eq('is_active', true)
+      .order('name')
+
+    if (error) return []
+    return data || []
+  }
+
+  async detectNetwork(phoneNumber: string): Promise<Network | null> {
+    const networks = await this.getNetworks()
+    const prefix = phoneNumber.slice(0, 4)
+    
+    const detected = networks.find(network => 
+      network.prefix_patterns?.some(pattern => prefix === pattern)
+    )
+    
+    return detected || null
+  }
+
   async buyAirtime(userId: string, bill: AirtimeBill): Promise<{ success: boolean; reference?: string; error?: string }> {
     try {
-      // Check user balance
       const { data: account, error: accountError } = await this.supabase
         .from('accounts')
         .select('balance')
@@ -154,9 +257,8 @@ export class BillService {
       }
 
       const reference = generateTransactionReference()
-
-      // Deduct from balance
       const newBalance = account.balance - bill.amount
+
       const { error: updateError } = await this.supabase
         .from('accounts')
         .update({ balance: newBalance })
@@ -164,8 +266,7 @@ export class BillService {
 
       if (updateError) throw updateError
 
-      // Create transaction record
-      const { error: transactionError } = await this.supabase
+      await this.supabase
         .from('transactions')
         .insert({
           user_id: userId,
@@ -181,9 +282,6 @@ export class BillService {
           status: 'completed',
         })
 
-      if (transactionError) throw transactionError
-
-      // Create bill payment record
       await this.supabase
         .from('bill_payments')
         .insert({
@@ -197,7 +295,6 @@ export class BillService {
           status: 'completed',
         })
 
-      // Create notification
       await this.createBillNotification(userId, 'Airtime', bill.amount, reference)
 
       return { success: true, reference }
@@ -207,12 +304,22 @@ export class BillService {
     }
   }
 
-  /**
-   * Buy data
-   */
+  // DATA BUNDLE SERVICES
+
+  async getDataBundles(networkCode: string): Promise<DataBundle[]> {
+    const { data, error } = await this.supabase
+      .from('data_bundles')
+      .select('*')
+      .eq('network_code', networkCode)
+      .eq('is_active', true)
+      .order('price', { ascending: true })
+
+    if (error) return []
+    return data || []
+  }
+
   async buyData(userId: string, bill: DataBill): Promise<{ success: boolean; reference?: string; error?: string }> {
     try {
-      // Check user balance
       const { data: account, error: accountError } = await this.supabase
         .from('accounts')
         .select('balance')
@@ -228,9 +335,8 @@ export class BillService {
       }
 
       const reference = generateTransactionReference()
-
-      // Deduct from balance
       const newBalance = account.balance - bill.amount
+
       const { error: updateError } = await this.supabase
         .from('accounts')
         .update({ balance: newBalance })
@@ -238,8 +344,7 @@ export class BillService {
 
       if (updateError) throw updateError
 
-      // Create transaction record
-      const { error: transactionError } = await this.supabase
+      await this.supabase
         .from('transactions')
         .insert({
           user_id: userId,
@@ -256,9 +361,6 @@ export class BillService {
           status: 'completed',
         })
 
-      if (transactionError) throw transactionError
-
-      // Create bill payment record
       await this.supabase
         .from('bill_payments')
         .insert({
@@ -272,7 +374,6 @@ export class BillService {
           status: 'completed',
         })
 
-      // Create notification
       await this.createBillNotification(userId, 'Data', bill.amount, reference)
 
       return { success: true, reference }
@@ -282,12 +383,33 @@ export class BillService {
     }
   }
 
-  /**
-   * Pay cable TV
-   */
+  // CABLE TV SERVICES
+
+  async getCableProviders(): Promise<CableProvider[]> {
+    const { data, error } = await this.supabase
+      .from('cable_providers')
+      .select('*')
+      .eq('is_active', true)
+      .order('name')
+
+    if (error) return []
+    return data || []
+  }
+
+  async getCablePackages(providerCode: string): Promise<CablePackage[]> {
+    const { data, error } = await this.supabase
+      .from('cable_packages')
+      .select('*')
+      .eq('provider_code', providerCode)
+      .eq('is_active', true)
+      .order('price', { ascending: true })
+
+    if (error) return []
+    return data || []
+  }
+
   async payCableTV(userId: string, bill: CableTVBill): Promise<{ success: boolean; reference?: string; error?: string }> {
     try {
-      // Check user balance
       const { data: account, error: accountError } = await this.supabase
         .from('accounts')
         .select('balance')
@@ -303,9 +425,8 @@ export class BillService {
       }
 
       const reference = generateTransactionReference()
-
-      // Deduct from balance
       const newBalance = account.balance - bill.amount
+
       const { error: updateError } = await this.supabase
         .from('accounts')
         .update({ balance: newBalance })
@@ -313,8 +434,7 @@ export class BillService {
 
       if (updateError) throw updateError
 
-      // Create transaction record
-      const { error: transactionError } = await this.supabase
+      await this.supabase
         .from('transactions')
         .insert({
           user_id: userId,
@@ -331,9 +451,6 @@ export class BillService {
           status: 'completed',
         })
 
-      if (transactionError) throw transactionError
-
-      // Create bill payment record
       await this.supabase
         .from('bill_payments')
         .insert({
@@ -347,7 +464,6 @@ export class BillService {
           status: 'completed',
         })
 
-      // Create notification
       await this.createBillNotification(userId, 'Cable TV', bill.amount, reference)
 
       return { success: true, reference }
@@ -357,31 +473,196 @@ export class BillService {
     }
   }
 
-  /**
-   * Verify electricity meter
-   */
-  async verifyElectricityMeter(meterNumber: string, provider: string): Promise<{ success: boolean; customerName?: string; error?: string }> {
-    // Mock verification - in production, integrate with actual API
-    return {
-      success: true,
-      customerName: `Customer ${meterNumber.slice(-4)}`,
-    }
-  }
-
-  /**
-   * Verify smart card
-   */
   async verifySmartCard(smartCardNumber: string, provider: string): Promise<{ success: boolean; customerName?: string; error?: string }> {
-    // Mock verification - in production, integrate with actual API
+    const mockNames = [
+      'Mr. Olumide Adebayo',
+      'Mrs. Ifeoma Eze',
+      'Dr. Hassan Bello',
+      'Chief Ejiro Omatseye',
+      'Miss Aisha Mohammed',
+      'Prof. Chidi Odinkalu',
+      'Mrs. Ronke Kosoko',
+      'Mr. Tunde Kelani',
+      'Barr. Funmilayo Ransome-Kuti',
+      'Alhaji Shehu Shagari',
+    ]
+    const randomName = mockNames[Math.floor(Math.random() * mockNames.length)]
+    
     return {
       success: true,
-      customerName: `Customer ${smartCardNumber.slice(-4)}`,
+      customerName: randomName,
     }
   }
 
-  /**
-   * Create notification for bill payment
-   */
+  
+  // BETTING SERVICES
+
+  async getBettingPlatforms(): Promise<BettingPlatform[]> {
+    const { data, error } = await this.supabase
+      .from('betting_platforms')
+      .select('*')
+      .eq('is_active', true)
+      .order('name')
+
+    if (error) return []
+    return data || []
+  }
+
+  async fundBettingAccount(
+  userId: string,
+  bill: BettingBill
+): Promise<{ success: boolean; reference?: string; error?: string }> {
+  try {
+    const { data: platform, error: platformError } = await this.supabase
+      .from('betting_platforms')
+      .select('name')
+      .eq('code', bill.platformCode)
+      .single()
+
+    if (platformError || !platform) {
+      return { success: false, error: 'Betting platform not found' }
+    }
+
+      const { data: account, error: accountError } = await this.supabase
+        .from('accounts')
+        .select('balance')
+        .eq('user_id', userId)
+        .single()
+
+      if (accountError || !account) {
+        return { success: false, error: 'Account not found' }
+      }
+
+      if (account.balance < bill.amount) {
+        return { success: false, error: 'Insufficient funds' }
+      }
+
+      const reference = generateTransactionReference()
+      const newBalance = account.balance - bill.amount
+
+      const { error: updateError } = await this.supabase
+        .from('accounts')
+        .update({ balance: newBalance })
+        .eq('user_id', userId)
+
+      if (updateError) throw updateError
+
+      await this.supabase
+        .from('transactions')
+        .insert({
+          user_id: userId,
+          type: 'debit',
+          category: 'betting',
+          amount: bill.amount,
+          description: `Betting Deposit: ${platform.name}`,
+          reference,
+          metadata: {
+            platform: platform.name,
+            phone_number: bill.phoneNumber,
+          },
+          status: 'completed',
+        })
+
+      await this.createBettingNotification(userId, platform.name, bill.amount)
+
+      return { success: true, reference }
+    } catch (error: any) {
+      console.error('Betting deposit error:', error)
+      return { success: false, error: error.message }
+    }
+  }
+
+  private async createBettingNotification(userId: string, platform: string, amount: number) {
+    await this.supabase
+      .from('notifications')
+      .insert({
+        user_id: userId,
+        title: 'Betting Deposit Successful',
+        message: `Your deposit of ₦${amount.toLocaleString()} to ${platform} was successful.`,
+        type: 'transaction',
+      })
+  }
+
+  // ACCOUNT VERIFICATION SERVICE (For Transfers)
+
+  async verifyAccountNumber(
+    accountNumber: string,
+    bankCode?: string
+  ): Promise<{ success: boolean; accountName?: string; bankName?: string; error?: string }> {
+
+    
+    await new Promise(resolve => setTimeout(resolve, 800))
+    
+    const mockBankNames: Record<string, string> = {
+      '001': 'GTBank',
+      '002': 'Zenith Bank',
+      '003': 'Access Bank',
+      '004': 'First Bank',
+      '005': 'UBA',
+      '006': 'FCMB',
+      '007': 'Stanbic IBTC',
+      '008': 'Union Bank',
+      '009': 'Polaris Bank',
+      '010': 'Wema Bank',
+      '011': 'Keystone Bank',
+      '012': 'Unity Bank',
+      '013': 'Fidelity Bank',
+      '014': 'Heritage Bank',
+      '015': 'Jaiz Bank',
+    }
+    
+    const mockAccountNames = [
+      'OLUWASEUN ADEBAYO JOHNSON',
+      'IFEANYI EMMANUEL OKONKWO',
+      'FUNMILAYO OLUWASEUN ADELEKE',
+      'MUSA BELLO ADAMU',
+      'CHIOMA GRACE NWOSU',
+      'EMMANUEL OLAKUNLE ADEYEMI',
+      'ABDULLAHI IBRAHIM SANI',
+      'PRECIOUS CHINEDU OBI',
+      'OLAMIDE TEMITOPE AKINDELE',
+      'FAITH NWANYINMA OGBONNAYA',
+      'MICHAEL CHUKWUEBUKA OKAFOR',
+      'JENNIFER UCHECHUKWU EZE',
+      'VICTOR OLUWASEUN AYOOLA',
+      'GRACE ADEBUKOLA OGUNLESI',
+      'SAMUEL CHIDIEBERE NWANKWO',
+      'ESTHER OLABISI ADELEKE',
+      'DANIEL OLUWATOSIN ADEWALE',
+      'MARY OLUWAKEMI AFOLABI',
+      'JOSEPH CHIBUIKE UGWU',
+      'RACHEL OMOBONIKE EKPO',
+    ]
+    
+    const randomName = mockAccountNames[Math.floor(Math.random() * mockAccountNames.length)]
+    const bankName = bankCode ? mockBankNames[bankCode] || 'GTBank' : 'GTBank'
+    
+    // Validate account number length 
+    if (!/^\d{10}$/.test(accountNumber)) {
+      return { 
+        success: false, 
+        error: 'Invalid account number. Must be 10 digits.' 
+      }
+    }
+    
+    // Mock: Some account numbers "fail" verification to simulate real scenarios
+    const failingAccounts = ['0000000000', '1111111111', '9999999999']
+    if (failingAccounts.includes(accountNumber)) {
+      return { 
+        success: false, 
+        error: 'Account number not found. Please check and try again.' 
+      }
+    }
+    
+    return {
+      success: true,
+      accountName: randomName,
+      bankName,
+    }
+  }
+
+  // NOTIFICATION HELPER
+
   private async createBillNotification(userId: string, billType: string, amount: number, reference: string) {
     await this.supabase
       .from('notifications')

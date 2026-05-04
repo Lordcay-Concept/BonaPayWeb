@@ -81,7 +81,6 @@ export default function DashboardPage() {
         return
       }
 
-      // Fetch account data
       const { data: accountData, error: accountError } = await supabase
         .from('accounts')
         .select('account_number, balance')
@@ -91,7 +90,6 @@ export default function DashboardPage() {
       if (accountError) throw accountError
       setAccount(accountData)
 
-      // Fetch recent transactions
       const { data: transactionsData, error: transactionsError } = await supabase
         .from('transactions')
         .select('id, amount, description, type, category, created_at, recipient_name')
@@ -102,7 +100,6 @@ export default function DashboardPage() {
       if (transactionsError) throw transactionsError
       setTransactions(transactionsData || [])
 
-      // Calculate analytics for last 30 days
       const thirtyDaysAgo = new Date()
       thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
 
@@ -112,13 +109,11 @@ export default function DashboardPage() {
         .eq('user_id', user.id)
         .gte('created_at', thirtyDaysAgo.toISOString())
 
-      if (allTransactions) {
-        // Calculate spending by category
+      if (allTransactions && allTransactions.length > 0) {
         const categoryMap = new Map<string, number>()
         let spent = 0
         let received = 0
 
-        // Fixed: Added proper type annotation for tx parameter
         allTransactions.forEach((tx: AnalyticsTransaction) => {
           if (tx.type === 'debit') {
             spent += tx.amount
@@ -143,12 +138,10 @@ export default function DashboardPage() {
 
         setSpendingData(spendingCategories)
 
-        // Calculate weekly data
         const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
         const weeklySpent = new Array(7).fill(0)
         const weeklyReceived = new Array(7).fill(0)
 
-        // Fixed: Added proper type annotation for tx parameter
         allTransactions.forEach((tx: AnalyticsTransaction) => {
           const date = new Date(tx.created_at)
           const dayIndex = date.getDay() === 0 ? 6 : date.getDay() - 1
@@ -362,42 +355,47 @@ export default function DashboardPage() {
             </CardHeader>
             <CardContent>
               {spendingData.length === 0 ? (
-                <div className="text-center py-8 text-slate-500">
+                <div className="text-center py-12 text-slate-500">
+                  <TrendingUp className="h-12 w-12 mx-auto mb-3 opacity-50" />
                   <p>No spending data available</p>
+                  <p className="text-sm">Make some transactions to see your spending patterns</p>
                 </div>
               ) : (
-                <div className="h-64">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                      <Pie
-                        data={spendingData}
-                        cx="50%"
-                        cy="50%"
-                        innerRadius={60}
-                        outerRadius={80}
-                        paddingAngle={5}
-                        dataKey="amount"
-                      >
-                        {spendingData.map((entry, index) => (
-                          <Cell key={`cell-${index}`} fill={entry.color} />
-                        ))}
-                      </Pie>
-                      <Tooltip formatter={(value) => formatCurrency(value as number)} />
-                    </PieChart>
-                  </ResponsiveContainer>
-                </div>
-              )}
-              <div className="mt-4 space-y-2">
-                {spendingData.map((category) => (
-                  <div key={category.category} className="flex justify-between items-center text-sm">
-                    <div className="flex items-center gap-2">
-                      <div className="w-3 h-3 rounded-full" style={{ backgroundColor: category.color }} />
-                      <span>{category.category}</span>
-                    </div>
-                    <span className="font-medium">{formatCurrency(category.amount)}</span>
+                <>
+                  <div className="h-64 w-full">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie
+                          data={spendingData}
+                          cx="50%"
+                          cy="50%"
+                          innerRadius={60}
+                          outerRadius={80}
+                          paddingAngle={5}
+                          dataKey="amount"
+                          label={({ name, percent }) => `${name} (${(percent * 100).toFixed(0)}%)`}
+                        >
+                          {spendingData.map((entry, index) => (
+                            <Cell key={`cell-${index}`} fill={entry.color} />
+                          ))}
+                        </Pie>
+                        <Tooltip formatter={(value) => formatCurrency(value as number)} />
+                      </PieChart>
+                    </ResponsiveContainer>
                   </div>
-                ))}
-              </div>
+                  <div className="mt-4 space-y-2">
+                    {spendingData.map((category) => (
+                      <div key={category.category} className="flex justify-between items-center text-sm">
+                        <div className="flex items-center gap-2">
+                          <div className="w-3 h-3 rounded-full" style={{ backgroundColor: category.color }} />
+                          <span>{category.category}</span>
+                        </div>
+                        <span className="font-medium">{formatCurrency(category.amount)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
             </CardContent>
           </Card>
 
@@ -407,18 +405,26 @@ export default function DashboardPage() {
               <CardTitle>Weekly Activity</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="h-64">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={weeklyData}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="day" />
-                    <YAxis tickFormatter={(value) => `₦${value / 1000}k`} />
-                    <Tooltip formatter={(value) => formatCurrency(value as number)} />
-                    <Bar dataKey="spent" fill="#EF4444" name="Spent" />
-                    <Bar dataKey="received" fill="#22C55E" name="Received" />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
+              {weeklyData.length === 0 || weeklyData.every(d => d.spent === 0 && d.received === 0) ? (
+                <div className="text-center py-12 text-slate-500">
+                  <Activity className="h-12 w-12 mx-auto mb-3 opacity-50" />
+                  <p>No activity data available</p>
+                  <p className="text-sm">Transactions this week will appear here</p>
+                </div>
+              ) : (
+                <div className="h-64 w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={weeklyData} margin={{ top: 10, right: 10, left: 10, bottom: 10 }}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="day" />
+                      <YAxis tickFormatter={(value) => `₦${value / 1000}k`} />
+                      <Tooltip formatter={(value) => formatCurrency(value as number)} />
+                      <Bar dataKey="spent" fill="#EF4444" name="Spent" radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="received" fill="#22C55E" name="Received" radius={[4, 4, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
             </CardContent>
           </Card>
         </div>
@@ -433,7 +439,7 @@ export default function DashboardPage() {
           </CardHeader>
           <CardContent>
             {transactions.length === 0 ? (
-              <div className="text-center py-8 text-slate-500">
+              <div className="text-center py-12 text-slate-500">
                 <CreditCard className="h-12 w-12 mx-auto mb-3 opacity-50" />
                 <p>No transactions yet</p>
                 <p className="text-sm">Make your first transfer or add demo funds</p>

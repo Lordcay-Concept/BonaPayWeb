@@ -2,6 +2,8 @@ import { getSupabaseClient } from '@/lib/supabase/client'
 import { LoginCredentials, SignupData, TwoFactorSetup, AuthResponse } from '@/types/auth'
 import { generateAccountNumber } from '@/lib/utils'
 import { createAuthenticator } from '@/lib/auth/totp'
+import { loginAlertsService, DeviceInfo } from '@/lib/security/login-alerts.service'
+// import { createAdminClient } from '@/lib/supabase/admin'
 
 export class AuthService {
   private supabase = getSupabaseClient()
@@ -10,78 +12,80 @@ export class AuthService {
    * Sign up a new user
    */
   async signUp(data: SignupData): Promise<AuthResponse> {
-    try {
-      // Create user in Supabase Auth
-      const { data: authData, error: signUpError } = await this.supabase.auth.signUp({
-        email: data.email,
-        password: data.password,
-        options: {
-          data: {
-            full_name: data.fullName,
-            phone: data.phone,
-            tier: 1,
-          },
+  try {
+    // Check if email is approved 
+    const { data: approvedEmail } = await this.supabase
+      .from('approved_emails')
+      .select('status')
+      .eq('email', data.email.toLowerCase())
+      .single()
+
+    const isApprovedEmail = approvedEmail?.status === 'approved'
+    
+    // Create user in Supabase Auth
+    const { data: authData, error: signUpError } = await this.supabase.auth.signUp({
+      email: data.email,
+      password: data.password,
+      options: {
+        data: {
+          full_name: data.fullName,
+          phone: data.phone,
+          tier: 1,
+          is_admin: isApprovedEmail, 
+          role: isApprovedEmail ? 'admin' : 'user',  
         },
-      })
+      },
+    })
 
-      if (signUpError) throw signUpError
+    if (signUpError) throw signUpError
 
-      if (authData.user) {
-        // Create user profile
-        const { error: profileError } = await this.supabase
+    if (authData.user) {
+      // Wait for trigger to complete
+      await new Promise(resolve => setTimeout(resolve, 1000))
+
+      // If approved email, update profile to ensure admin status
+      if (isApprovedEmail) {
+        const { error: updateError } = await this.supabase
           .from('profiles')
-          .insert({
-            id: authData.user.id,
-            full_name: data.fullName,
-            email: data.email,
-            phone: data.phone,
-            tier: 1,
-            kyc_status: 'pending',
+          .update({ 
+            is_admin: true,
+            role: 'admin'
           })
+          .eq('id', authData.user.id)
 
-        if (profileError) throw profileError
-
-        // Create account with demo balance
-        const accountNumber = generateAccountNumber()
-        const { error: accountError } = await this.supabase
-          .from('accounts')
-          .insert({
-            user_id: authData.user.id,
-            account_number: accountNumber,
-            balance: 50000.00, // ₦50,000 demo balance
-            ledger_balance: 50000.00,
-          })
-
-        if (accountError) throw accountError
-
-        // Create welcome notification
-        await this.createWelcomeNotification(authData.user.id)
-
-        return {
-          success: true,
-          data: {
-            user: authData.user as any,
-            session: authData.session as any,
-          },
+        if (updateError) {
+          console.error('Error updating admin status:', updateError)
         }
       }
 
-      return { success: false, error: 'Failed to create account' }
-    } catch (error: any) {
-      console.error('Signup error:', error)
-      return { success: false, error: error.message }
+      // Create welcome notification
+      await this.createWelcomeNotification(authData.user.id)
+
+      return {
+        success: true,
+        data: {
+          user: authData.user as any,
+          session: authData.session as any,
+        },
+      }
     }
+
+    return { success: false, error: 'Failed to create account' }
+  } catch (error: any) {
+    console.error('Signup error:', error)
+    return { success: false, error: error.message }
   }
+}
 
   /**
    * Login user with email and password
    */
-  async login(credentials: LoginCredentials): Promise<AuthResponse> {
+  async login(credentials: LoginCredentials, request?: Request): Promise<AuthResponse> {
     try {
-      // First, check if user exists and is not locked
+      // Check if user exists and is not locked
       const { data: userData } = await this.supabase
         .from('profiles')
-        .select('account_locked, account_locked_until, failed_login_attempts')
+        .select('account_locked, account_locked_until, failed_login_attempts, id')
         .eq('email', credentials.email)
         .single()
 
@@ -119,7 +123,7 @@ export class AuthService {
           // Lock account after 5 failed attempts
           if (newAttempts >= 5) {
             updates.account_locked = true
-            updates.account_locked_until = new Date(Date.now() + 30 * 60 * 1000) // 30 minutes
+            updates.account_locked_until = new Date(Date.now() + 30 * 60 * 1000) 
           }
           
           await this.supabase.from('profiles').update(updates).eq('email', credentials.email)
@@ -164,6 +168,11 @@ export class AuthService {
         }
       }
 
+      // Handle login alerts for new devices
+      if (request) {
+        await this.handleLoginAlerts(data.user.id, request)
+      }
+
       // Log successful login to audit
       await this.logAudit(data.user.id, 'login', 'user', data.user.id, null, {
         ip: await this.getClientIP(),
@@ -183,18 +192,79 @@ export class AuthService {
   }
 
   /**
+   * Handle login alerts for new device detection
+   */
+  private async handleLoginAlerts(userId: string, request: Request): Promise<void> {
+    try {
+      // Get device information from request
+      const userAgent = request.headers.get('user-agent') || 'unknown'
+      const ipAddress = request.headers.get('x-forwarded-for') || 
+                       request.headers.get('x-real-ip') || 
+                       'unknown'
+      
+      // Parse user agent
+      const parsedDevice = loginAlertsService.parseUserAgent(userAgent)
+      
+      // Get location from IP 
+      const location = await this.getLocationFromIP(ipAddress as string)
+      
+      // Create device info
+      const deviceInfo: DeviceInfo = {
+        userAgent,
+        ipAddress: ipAddress as string,
+        deviceType: parsedDevice.deviceType || 'unknown',
+        browser: parsedDevice.browser,
+        os: parsedDevice.os,
+        location,
+      }
+      
+      // Generate device fingerprint
+      const fingerprint = loginAlertsService.generateDeviceFingerprint(deviceInfo)
+      
+      // Check if device is known
+      const isKnown = await loginAlertsService.isKnownDevice(userId, fingerprint)
+      
+      if (!isKnown) {
+        // Register new device
+        await loginAlertsService.registerDevice(userId, fingerprint, deviceInfo)
+        
+        // Send new device alert
+        await loginAlertsService.sendLoginAlert(userId, deviceInfo, 'new_device')
+      } else {
+        // Update last seen
+        await loginAlertsService.updateDeviceLastSeen(userId, fingerprint)
+      }
+    } catch (error) {
+      console.error('Error handling login alerts:', error)
+   
+    }
+  }
+
+  /**
+   * Get location from IP address
+   */
+  private async getLocationFromIP(ip: string): Promise<string> {
+    try {
+     
+      return 'Location unknown'
+    } catch (error) {
+      return 'Location unknown'
+    }
+  }
+
+  /**
    * Setup 2FA for user
    */
   async setupTwoFactor(userId: string): Promise<TwoFactorSetup | null> {
     try {
       const authenticator = createAuthenticator()
       const secret = authenticator.generateSecret()
-      const qrCode = await authenticator.generateQRCode(secret, 'FintechFlow')
+      const qrCode = await authenticator.generateQRCode(secret, 'BonaPay')
       const recoveryCodes = Array.from({ length: 10 }, () => 
         Math.random().toString(36).substring(2, 10).toUpperCase()
       )
 
-      // Store secret temporarily (will be verified before enabling)
+      // Store secret temporarily 
       await this.supabase
         .from('profiles')
         .update({ 
@@ -305,8 +375,8 @@ export class AuthService {
       .from('notifications')
       .insert({
         user_id: userId,
-        title: 'Welcome to FintechFlow! 🎉',
-        message: 'Thank you for joining us. Start your financial journey today with ₦50,000 demo balance.',
+        title: 'Welcome to BonaPay! 🎉',
+        message: 'Thank you for joining us. Start your financial journey today.',
         type: 'system',
         metadata: { action: 'onboarding' },
       })
@@ -338,10 +408,10 @@ export class AuthService {
   }
 
   /**
-   * Get client IP (simplified for demo)
+   * Get client IP 
    */
   private async getClientIP(): Promise<string> {
-    // In production, you'd get this from the request headers
+   
     return '127.0.0.1'
   }
 }

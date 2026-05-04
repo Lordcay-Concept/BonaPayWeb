@@ -13,6 +13,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import { Mail, Lock, ArrowRight, Eye, EyeOff, Shield, AlertCircle } from 'lucide-react'
+import { getSupabaseClient } from '@/lib/supabase/client'
 
 type LoginFormData = {
   email: string
@@ -41,34 +42,54 @@ export default function LoginPage() {
   const twoFactorCode = watch('twoFactorCode')
 
   const onSubmit = async (data: LoginFormData) => {
-    setIsLoading(true)
+  setIsLoading(true)
 
-    try {
-      const result = await authService.login({
-        email: data.email,
-        password: data.password,
-        twoFactorCode: data.twoFactorCode,
-      })
+  try {
+    const result = await authService.login({
+      email: data.email,
+      password: data.password,
+      twoFactorCode: data.twoFactorCode,
+    })
 
-      if (result.success) {
-        if (result.requiresTwoFactor) {
-          setRequiresTwoFactor(true)
-          setTempSession(result.data)
-          toast.success('Please enter your 2FA code')
-        } else {
-          toast.success('Welcome back!')
+    if (result.success) {
+      if (result.requiresTwoFactor) {
+        setRequiresTwoFactor(true)
+        setTempSession(result.data)
+        toast.success('Please enter your 2FA code')
+      } else {
+        // Check if user has admin role
+        const supabase = getSupabaseClient()
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('role')
+          .eq('id', result.data?.user?.id)
+          .single()
+        
+        if (profile?.role !== 'admin') {
+          // Regular user trying to login on web - sign them out and show error
+          await authService.logout()
+          toast.error('Web access is only for administrators. Please use the mobile app.')
+          setIsLoading(false)
+          return
+        }
+        
+        toast.success('Welcome back!')
+        
+        // Redirect admin to admin dashboard or regular dashboard
+        if (profile?.role === 'admin') {
           const redirectTo = searchParams.get('redirectedFrom') || '/dashboard'
           router.push(redirectTo)
         }
-      } else {
-        toast.error(result.error || 'Invalid email or password')
       }
-    } catch (error: any) {
-      toast.error(error.message || 'An error occurred')
-    } finally {
-      setIsLoading(false)
+    } else {
+      toast.error(result.error || 'Invalid email or password')
     }
+  } catch (error: any) {
+    toast.error(error.message || 'An error occurred')
+  } finally {
+    setIsLoading(false)
   }
+}
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100 dark:from-slate-900 dark:to-slate-800 p-4">
@@ -85,7 +106,7 @@ export default function LoginPage() {
           <CardDescription>
             {requiresTwoFactor
               ? 'Enter the 6-digit code from your authenticator app'
-              : 'Sign in to your FintechFlow account'}
+              : 'Sign in to your BonaPay account'}
           </CardDescription>
         </CardHeader>
 

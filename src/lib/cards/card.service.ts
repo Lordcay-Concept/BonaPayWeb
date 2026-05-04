@@ -27,13 +27,13 @@ export class CardService {
   private supabase = getSupabaseClient()
 
   /**
-   * Generate a mock virtual card number with proper prefixes for each card type
+   * Generate a mock virtual card number
    */
   private generateCardNumber(cardType: 'visa' | 'mastercard' | 'verve'): string {
     const prefixes = {
       visa: '4',
       mastercard: '5',
-      verve: '5061', // Verve cards typically start with 5061, 5078, 5080, etc.
+      verve: '5061', 
     }
     
     const prefix = prefixes[cardType]
@@ -49,14 +49,14 @@ export class CardService {
   }
 
   /**
-   * Generate CVV (3 digits for all card types)
+   * Generate CVV (
    */
   private generateCVV(): string {
     return Math.floor(100 + Math.random() * 900).toString()
   }
 
   /**
-   * Generate expiry date (3 years from now)
+   * Generate expiry date 
    */
   private generateExpiryDate(): { month: string; year: string } {
     const date = new Date()

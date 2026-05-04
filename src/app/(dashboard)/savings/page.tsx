@@ -12,12 +12,12 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Progress } from '@/components/ui/progress'
-import { PiggyBank, TrendingUp, Calendar, Lock, ArrowRight, Wallet, AlertCircle } from 'lucide-react'
+import { PiggyBank, TrendingUp, Calendar, Lock, ArrowRight, Wallet } from 'lucide-react'
 
 export default function SavingsPage() {
   const router = useRouter()
+  const [activeTab, setActiveTab] = useState('active')
   const [products, setProducts] = useState<SavingsProduct[]>([])
   const [userSavings, setUserSavings] = useState<UserSavings[]>([])
   const [loading, setLoading] = useState(true)
@@ -131,6 +131,11 @@ export default function SavingsPage() {
     )
   }
 
+  const tabs = [
+    { id: 'active', label: 'Active Savings', icon: PiggyBank },
+    { id: 'products', label: 'Savings Plans', icon: TrendingUp },
+  ]
+
   return (
     <DashboardLayout>
       <div className="space-y-6 animate-fade-in">
@@ -141,20 +146,36 @@ export default function SavingsPage() {
           </p>
         </div>
 
-        <Tabs defaultValue="active" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-2 lg:w-[400px]">
-            <TabsTrigger value="active">Active Savings</TabsTrigger>
-            <TabsTrigger value="products">Savings Plans</TabsTrigger>
-          </TabsList>
+        {/* Horizontal Tab Navigation */}
+        <div className="border-b border-slate-200 dark:border-slate-700">
+          <div className="flex gap-6">
+            {tabs.map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={`px-4 py-2 text-sm font-medium transition-all border-b-2 flex items-center gap-2 ${
+                  activeTab === tab.id 
+                    ? 'border-blue-600 text-blue-600 dark:border-blue-400 dark:text-blue-400' 
+                    : 'border-transparent text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-300'
+                }`}
+              >
+                <tab.icon className="h-4 w-4" />
+                {tab.label}
+              </button>
+            ))}
+          </div>
+        </div>
 
-          <TabsContent value="active" className="space-y-6">
+        {/* Active Savings Content */}
+        {activeTab === 'active' && (
+          <div className="space-y-6">
             {userSavings.length === 0 ? (
               <Card className="text-center py-12">
                 <CardContent>
                   <PiggyBank className="h-12 w-12 mx-auto mb-3 text-slate-400" />
                   <h3 className="text-lg font-semibold mb-2">No Active Savings</h3>
                   <p className="text-slate-500 mb-4">Start saving today and watch your money grow</p>
-                  <Button onClick={() => document.querySelector('[value="products"]')?.dispatchEvent(new Event('click'))}>
+                  <Button onClick={() => setActiveTab('products')}>
                     Explore Savings Plans
                   </Button>
                 </CardContent>
@@ -251,59 +272,60 @@ export default function SavingsPage() {
                 ))}
               </div>
             )}
-          </TabsContent>
+          </div>
+        )}
 
-          <TabsContent value="products" className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {products.map((product) => (
-                <Card key={product.id} className="hover:shadow-lg transition-shadow">
-                  <CardHeader>
-                    <div className="flex justify-between items-start">
-                      <div className="p-2 bg-gradient-to-br from-blue-500 to-blue-600 rounded-lg">
-                        <PiggyBank className="h-5 w-5 text-white" />
-                      </div>
-                      <div className="text-right">
-                        <p className="text-2xl font-bold text-blue-600">{product.interest_rate}%</p>
-                        <p className="text-xs text-slate-500">p.a</p>
-                      </div>
+        {/* Savings Plans Content */}
+        {activeTab === 'products' && (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {products.map((product) => (
+              <Card key={product.id} className="hover:shadow-lg transition-shadow">
+                <CardHeader>
+                  <div className="flex justify-between items-start">
+                    <div className="p-2 bg-gradient-to-br from-blue-500 to-blue-600 rounded-lg">
+                      <PiggyBank className="h-5 w-5 text-white" />
                     </div>
-                    <CardTitle className="mt-4">{product.name}</CardTitle>
-                    <CardDescription>{product.description}</CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div className="space-y-2">
-                      <div className="flex justify-between text-sm">
-                        <span className="text-slate-500">Minimum Balance</span>
-                        <span className="font-medium">{formatCurrency(product.minimum_balance)}</span>
-                      </div>
-                      {product.duration_days && (
-                        <div className="flex justify-between text-sm">
-                          <span className="text-slate-500">Lock Period</span>
-                          <span className="font-medium">{product.duration_days} days</span>
-                        </div>
-                      )}
-                      <div className="flex justify-between text-sm">
-                        <span className="text-slate-500">Projected Return (1 year)</span>
-                        <span className="font-medium text-green-600">
-                          +{formatCurrency(100000 * product.interest_rate / 100)}
-                        </span>
-                      </div>
+                    <div className="text-right">
+                      <p className="text-2xl font-bold text-blue-600">{product.interest_rate}%</p>
+                      <p className="text-xs text-slate-500">p.a</p>
                     </div>
+                  </div>
+                  <CardTitle className="mt-4">{product.name}</CardTitle>
+                  <CardDescription>{product.description}</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="space-y-2">
+                    <div className="flex justify-between text-sm">
+                      <span className="text-slate-500">Minimum Balance</span>
+                      <span className="font-medium">{formatCurrency(product.minimum_balance)}</span>
+                    </div>
+                    {product.duration_days && (
+                      <div className="flex justify-between text-sm">
+                        <span className="text-slate-500">Lock Period</span>
+                        <span className="font-medium">{product.duration_days} days</span>
+                      </div>
+                    )}
+                    <div className="flex justify-between text-sm">
+                      <span className="text-slate-500">Projected Return (1 year)</span>
+                      <span className="font-medium text-green-600">
+                        +{formatCurrency(100000 * product.interest_rate / 100)}
+                      </span>
+                    </div>
+                  </div>
 
-                    <Dialog>
-                      <DialogTrigger asChild>
-                        <Button className="w-full" onClick={() => setSelectedProduct(product)}>
-                          Start Saving
-                          <ArrowRight className="h-4 w-4 ml-2" />
-                        </Button>
-                      </DialogTrigger>
-                    </Dialog>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          </TabsContent>
-        </Tabs>
+                  <Dialog>
+                    <DialogTrigger asChild>
+                      <Button className="w-full" onClick={() => setSelectedProduct(product)}>
+                        Start Saving
+                        <ArrowRight className="h-4 w-4 ml-2" />
+                      </Button>
+                    </DialogTrigger>
+                  </Dialog>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Create Savings Dialog */}

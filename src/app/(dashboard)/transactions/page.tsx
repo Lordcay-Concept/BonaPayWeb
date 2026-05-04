@@ -1,257 +1,323 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
+import { useForm } from 'react-hook-form'
+import { zodResolver } from '@hookform/resolvers/zod'
+import toast from 'react-hot-toast'
+import { transferSchema } from '@/lib/validations'
 import { getSupabaseClient } from '@/lib/supabase/client'
-import { formatCurrency, formatDate } from '@/lib/utils'
+import { billService } from '@/lib/bills/bill.service'
+import { formatCurrency, generateTransactionReference } from '@/lib/utils'
 import DashboardLayout from '@/components/layout/dashboard-layout'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
-import { Search, ArrowUpRight, TrendingUp, Filter, Download } from 'lucide-react'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
+import { ArrowRight, Building2, AlertCircle, CheckCircle, Loader2 } from 'lucide-react'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 
-interface Transaction {
-  id: string
+type TransferFormData = {
+  recipientAccount: string
   amount: number
-  description: string
-  type: 'debit' | 'credit'
-  status: string
-  created_at: string
-  recipient_name?: string
-  recipient_account?: string
-  reference: string
+  note?: string
 }
 
-export default function TransactionsPage() {
+interface Account {
+  balance: number
+  account_number: string
+}
+
+export default function TransferPage() {
   const router = useRouter()
-  const [transactions, setTransactions] = useState<Transaction[]>([])
-  const [filteredTransactions, setFilteredTransactions] = useState<Transaction[]>([])
-  const [loading, setLoading] = useState(true)
-  const [searchTerm, setSearchTerm] = useState('')
-  const [filter, setFilter] = useState<'all' | 'credit' | 'debit'>('all')
+  const [account, setAccount] = useState<Account | null>(null)
+  const [showConfirm, setShowConfirm] = useState(false)
+  const [transferData, setTransferData] = useState<TransferFormData | null>(null)
+  const [isLoading, setIsLoading] = useState(false)
+  const [verifying, setVerifying] = useState(false)
+  const [verifiedAccount, setVerifiedAccount] = useState<{ name: string; bank: string } | null>(null)
+  const [verificationError, setVerificationError] = useState<string | null>(null)
+
+  const {
+    register,
+    handleSubmit,
+    watch,
+    setValue,
+    formState: { errors },
+    reset,
+  } = useForm<TransferFormData>({
+    resolver: zodResolver(transferSchema),
+  })
+
+  const amount = watch('amount')
+  const recipientAccount = watch('recipientAccount')
+
+  const isDisabled = !recipientAccount || !amount || (account ? amount > account.balance : false)
 
   useEffect(() => {
-    fetchTransactions()
+    fetchAccount()
   }, [])
 
-  useEffect(() => {
-    filterTransactions()
-  }, [searchTerm, filter, transactions])
-
-  const fetchTransactions = async () => {
+  const fetchAccount = async () => {
     const supabase = getSupabaseClient()
+    const { data: { user } } = await supabase.auth.getUser()
     
+    if (!user) {
+      router.push('/login')
+      return
+    }
+
+    const { data, error } = await supabase
+      .from('accounts')
+      .select('balance, account_number')
+      .eq('user_id', user.id)
+      .single()
+
+    if (!error && data) {
+      setAccount(data)
+    }
+  }
+
+  // Verify account number when user types
+  const handleAccountNumberChange = async (accountNumber: string) => {
+    setValue('recipientAccount', accountNumber)
+    setVerifiedAccount(null)
+    setVerificationError(null)
+    
+    if (accountNumber.length === 10) {
+      setVerifying(true)
+      try {
+        const result = await billService.verifyAccountNumber(accountNumber)
+        if (result.success) {
+          setVerifiedAccount({
+            name: result.accountName!,
+            bank: result.bankName!,
+          })
+        } else {
+          setVerificationError(result.error || 'Verification failed')
+        }
+      } catch (error) {
+        setVerificationError('Unable to verify account')
+      } finally {
+        setVerifying(false)
+      }
+    }
+  }
+
+  const onSubmit = (data: TransferFormData) => {
+    if (!verifiedAccount) {
+      toast.error('Please verify the account number first')
+      return
+    }
+    
+    if (account && data.amount > account.balance) {
+      toast.error('Insufficient funds')
+      return
+    }
+    setTransferData(data)
+    setShowConfirm(true)
+  }
+
+  const handleConfirmTransfer = async () => {
+    if (!transferData) return
+    
+    setIsLoading(true)
+    const supabase = getSupabaseClient()
+
     try {
       const { data: { user } } = await supabase.auth.getUser()
-      if (!user) {
-        router.push('/login')
-        return
-      }
+      if (!user) throw new Error('Not authenticated')
 
-      const { data, error } = await supabase
-        .from('transactions')
-        .select('*')
+      const newBalance = (account?.balance || 0) - transferData.amount
+      
+      const { error: updateError } = await supabase
+        .from('accounts')
+        .update({ balance: newBalance })
         .eq('user_id', user.id)
-        .order('created_at', { ascending: false })
 
-      if (error) throw error
-      setTransactions(data || [])
-      setFilteredTransactions(data || [])
+      if (updateError) throw updateError
+
+      const { error: transactionError } = await supabase
+        .from('transactions')
+        .insert({
+          user_id: user.id,
+          type: 'debit',
+          amount: transferData.amount,
+          description: transferData.note || 'Money Transfer',
+          reference: generateTransactionReference(),
+          recipient_account: transferData.recipientAccount,
+          recipient_name: verifiedAccount?.name || 'Recipient',
+          status: 'completed',
+        })
+
+      if (transactionError) throw transactionError
+
+      toast.success(`Successfully sent ${formatCurrency(transferData.amount)} to ${verifiedAccount?.name}`)
+      reset()
+      setVerifiedAccount(null)
+      setVerificationError(null)
+      setShowConfirm(false)
+      fetchAccount()
+      router.push('/transactions')
     } catch (error: any) {
-      console.error('Failed to fetch transactions:', error)
+      toast.error(error.message || 'Transfer failed')
     } finally {
-      setLoading(false)
+      setIsLoading(false)
     }
-  }
-
-  const filterTransactions = () => {
-    let filtered = [...transactions]
-
-    // Apply type filter
-    if (filter !== 'all') {
-      filtered = filtered.filter(t => t.type === filter)
-    }
-
-    // Apply search filter
-    if (searchTerm) {
-      filtered = filtered.filter(t => 
-        t.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        t.reference.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (t.recipient_name && t.recipient_name.toLowerCase().includes(searchTerm.toLowerCase()))
-      )
-    }
-
-    setFilteredTransactions(filtered)
-  }
-
-  const handleExport = () => {
-    // Create CSV data
-    const csvData = filteredTransactions.map(t => ({
-      Date: formatDate(t.created_at),
-      Description: t.description,
-      Type: t.type === 'credit' ? 'Money In' : 'Money Out',
-      Amount: t.type === 'credit' ? t.amount : -t.amount,
-      Reference: t.reference,
-      Status: t.status,
-    }))
-
-    const headers = Object.keys(csvData[0] || {}).join(',')
-    const rows = csvData.map(row => Object.values(row).join(','))
-    const csv = [headers, ...rows].join('\n')
-
-    // Download file
-    const blob = new Blob([csv], { type: 'text/csv' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `transactions_${new Date().toISOString().split('T')[0]}.csv`
-    a.click()
-    URL.revokeObjectURL(url)
-  }
-
-  if (loading) {
-    return (
-      <DashboardLayout>
-        <div className="flex items-center justify-center h-96">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-        </div>
-      </DashboardLayout>
-    )
   }
 
   return (
     <DashboardLayout>
-      <div className="space-y-6 animate-fade-in">
-        <div className="flex justify-between items-center">
-          <div>
-            <h1 className="text-3xl font-bold">Transactions</h1>
-            <p className="text-slate-600 dark:text-slate-400 mt-1">
-              View and manage all your transactions
-            </p>
-          </div>
-          <Button variant="outline" onClick={handleExport}>
-            <Download className="h-4 w-4 mr-2" />
-            Export
-          </Button>
+      <div className="max-w-2xl mx-auto space-y-6 animate-fade-in">
+        <div>
+          <h1 className="text-3xl font-bold">Send Money</h1>
+          <p className="text-slate-600 dark:text-slate-400 mt-1">
+            Transfer money to any bank account in Nigeria
+          </p>
         </div>
 
         <Card>
           <CardHeader>
-            <CardTitle>Transaction History</CardTitle>
+            <CardTitle>Transfer Details</CardTitle>
           </CardHeader>
           <CardContent>
-            {/* Search and Filters */}
-            <div className="flex flex-col sm:flex-row gap-4 mb-6">
-              <div className="relative flex-1">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-slate-400" />
-                <Input
-                  placeholder="Search by description, reference, or recipient..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="pl-10"
-                />
-              </div>
-              <div className="flex gap-2">
-                <Button
-                  variant={filter === 'all' ? 'default' : 'outline'}
-                  onClick={() => setFilter('all')}
-                  size="sm"
-                >
-                  All
-                </Button>
-                <Button
-                  variant={filter === 'credit' ? 'default' : 'outline'}
-                  onClick={() => setFilter('credit')}
-                  size="sm"
-                  className="gap-1"
-                >
-                  <TrendingUp className="h-4 w-4" />
-                  Money In
-                </Button>
-                <Button
-                  variant={filter === 'debit' ? 'default' : 'outline'}
-                  onClick={() => setFilter('debit')}
-                  size="sm"
-                  className="gap-1"
-                >
-                  <ArrowUpRight className="h-4 w-4" />
-                  Money Out
-                </Button>
-              </div>
-            </div>
-
-            {/* Transactions List */}
-            {filteredTransactions.length === 0 ? (
-              <div className="text-center py-12">
-                <div className="inline-flex p-4 bg-slate-100 dark:bg-slate-800 rounded-full mb-4">
-                  <Search className="h-8 w-8 text-slate-400" />
+            <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
+              <div className="space-y-2">
+                <Label htmlFor="recipientAccount">Recipient Account Number</Label>
+                <div className="relative">
+                  <Building2 className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-slate-400" />
+                  <Input
+                    id="recipientAccount"
+                    placeholder="0123456789"
+                    className="pl-10"
+                    value={recipientAccount}
+                    onChange={(e) => handleAccountNumberChange(e.target.value)}
+                  />
                 </div>
-                <p className="text-slate-500">No transactions found</p>
-                <p className="text-sm text-slate-400 mt-1">
-                  {searchTerm ? 'Try a different search term' : 'Your transactions will appear here'}
-                </p>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {filteredTransactions.map((transaction) => (
-                  <div
-                    key={transaction.id}
-                    className="flex items-center justify-between p-4 rounded-lg border hover:shadow-sm transition-all"
-                  >
-                    <div className="flex items-start gap-4">
-                      <div className={cn(
-                        "p-2 rounded-full",
-                        transaction.type === 'credit'
-                          ? "bg-green-100 dark:bg-green-900/30"
-                          : "bg-red-100 dark:bg-red-900/30"
-                      )}>
-                        {transaction.type === 'credit' ? (
-                          <TrendingUp className="h-5 w-5 text-green-600" />
-                        ) : (
-                          <ArrowUpRight className="h-5 w-5 text-red-600" />
-                        )}
-                      </div>
-                      <div>
-                        <p className="font-medium">{transaction.description}</p>
-                        {transaction.recipient_name && (
-                          <p className="text-sm text-slate-500">To: {transaction.recipient_name}</p>
-                        )}
-                        <div className="flex items-center gap-2 mt-1">
-                          <p className="text-xs text-slate-400">{formatDate(transaction.created_at)}</p>
-                          <span className="text-xs text-slate-300">•</span>
-                          <p className="text-xs text-slate-400">Ref: {transaction.reference.slice(0, 12)}...</p>
-                        </div>
-                      </div>
-                    </div>
-                    <div className="text-right">
-                      <div className={cn(
-                        "font-semibold",
-                        transaction.type === 'credit' ? "text-green-600" : "text-red-600"
-                      )}>
-                        {transaction.type === 'credit' ? '+' : '-'}{formatCurrency(transaction.amount)}
-                      </div>
-                      <div className={cn(
-                        "text-xs px-2 py-0.5 rounded-full mt-1",
-                        transaction.status === 'completed' 
-                          ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
-                          : transaction.status === 'pending'
-                          ? "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400"
-                          : "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"
-                      )}>
-                        {transaction.status}
-                      </div>
+                {errors.recipientAccount && (
+                  <p className="text-sm text-red-500">{errors.recipientAccount.message}</p>
+                )}
+                
+                {/* Verification Status */}
+                {verifying && (
+                  <div className="flex items-center gap-2 p-3 bg-slate-100 dark:bg-slate-800 rounded-lg">
+                    <Loader2 className="h-4 w-4 animate-spin text-blue-500" />
+                    <p className="text-sm text-slate-600">Verifying account...</p>
+                  </div>
+                )}
+                
+                {verifiedAccount && (
+                  <div className="flex items-center gap-2 p-3 bg-green-50 dark:bg-green-900/20 rounded-lg">
+                    <CheckCircle className="h-4 w-4 text-green-600" />
+                    <div>
+                      <p className="text-sm font-medium text-green-700 dark:text-green-300">
+                        {verifiedAccount.name}
+                      </p>
+                      <p className="text-xs text-green-600 dark:text-green-400">
+                        {verifiedAccount.bank}
+                      </p>
                     </div>
                   </div>
-                ))}
+                )}
+                
+                {verificationError && (
+                  <div className="flex items-center gap-2 p-3 bg-red-50 dark:bg-red-900/20 rounded-lg">
+                    <AlertCircle className="h-4 w-4 text-red-600" />
+                    <p className="text-sm text-red-700 dark:text-red-300">
+                      {verificationError}
+                    </p>
+                  </div>
+                )}
               </div>
-            )}
+
+              <div className="space-y-2">
+                <Label htmlFor="amount">Amount (NGN)</Label>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-500">₦</span>
+                  <Input
+                    id="amount"
+                    type="number"
+                    placeholder="0.00"
+                    className="pl-8"
+                    {...register('amount', { valueAsNumber: true })}
+                  />
+                </div>
+                {errors.amount && (
+                  <p className="text-sm text-red-500">{errors.amount.message}</p>
+                )}
+                {amount > 0 && account && (
+                  <p className="text-sm text-slate-500">
+                    Available balance: {formatCurrency(account.balance)}
+                  </p>
+                )}
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="note">Note (Optional)</Label>
+                <Textarea
+                  id="note"
+                  placeholder="What's this for?"
+                  {...register('note')}
+                />
+              </div>
+
+              {recipientAccount && amount > 0 && account && amount > account.balance && (
+                <div className="flex items-center gap-2 p-3 bg-red-50 dark:bg-red-900/20 rounded-lg text-red-600">
+                  <AlertCircle className="h-4 w-4" />
+                  <p className="text-sm">Insufficient funds. You need {formatCurrency(amount - account.balance)} more.</p>
+                </div>
+              )}
+
+              <Button
+                type="submit"
+                className="w-full"
+                size="lg"
+                disabled={isDisabled || !verifiedAccount}
+              >
+                Continue
+                <ArrowRight className="ml-2 h-4 w-4" />
+              </Button>
+            </form>
           </CardContent>
         </Card>
+
+        <AlertDialog open={showConfirm} onOpenChange={setShowConfirm}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Confirm Transfer</AlertDialogTitle>
+              <AlertDialogDescription>
+                You are about to send {transferData && formatCurrency(transferData.amount)} to:
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            {verifiedAccount && transferData && (
+              <div className="bg-slate-100 dark:bg-slate-800 p-4 rounded-lg space-y-2">
+                <p className="font-medium">{verifiedAccount.name}</p>
+                <p className="text-sm text-slate-500">{verifiedAccount.bank}</p>
+                <p className="text-sm font-mono text-slate-600">{transferData.recipientAccount}</p>
+                {transferData.note && (
+                  <p className="text-sm text-slate-500">Note: {transferData.note}</p>
+                )}
+              </div>
+            )}
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction onClick={handleConfirmTransfer} disabled={isLoading}>
+                {isLoading ? 'Processing...' : 'Confirm Transfer'}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
     </DashboardLayout>
   )
-}
-
-function cn(...classes: (string | undefined | boolean)[]) {
-  return classes.filter(Boolean).join(' ')
 }

@@ -1,10 +1,7 @@
 import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 
-/**
- * Supabase client for server-side operations
- * This client is used in Server Components and API routes
- */
+
 export async function createServerSupabaseClient() {
   const cookieStore = await cookies()
 

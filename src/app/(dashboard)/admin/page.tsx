@@ -7,16 +7,13 @@ import { formatCurrency } from '@/lib/utils'
 import DashboardLayout from '@/components/layout/dashboard-layout'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Users, Wallet, TrendingUp, Activity } from 'lucide-react'
+import toast from 'react-hot-toast'
 
 interface Stats {
   totalUsers: number
   totalBalance: number
   totalTransactions: number
   activeUsers: number
-}
-
-interface Account {
-  balance: number
 }
 
 export default function AdminPage() {
@@ -37,55 +34,78 @@ export default function AdminPage() {
   const checkAdminAndFetch = async () => {
     const supabase = getSupabaseClient()
     
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) {
-      router.push('/login')
-      return
-    }
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) {
+        router.push('/login')
+        return
+      }
 
-    // Simple admin check - in production, use roles table
-    if (user.email !== 'admin@fintechflow.com') {
+      const { data: profile, error: profileError } = await supabase
+        .from('profiles')
+        .select('is_admin, tier')
+        .eq('id', user.id)
+        .single()
+
+      if (profileError) {
+        console.error('Profile error:', profileError)
+        router.push('/dashboard')
+        return
+      }
+
+      const isUserAdmin = profile?.is_admin === true || profile?.tier === 3
+      
+      if (!isUserAdmin) {
+        router.push('/dashboard')
+        return
+      }
+
+      setIsAdmin(true)
+      await fetchStats()
+    } catch (error) {
+      console.error('Error checking admin:', error)
       router.push('/dashboard')
-      return
+    } finally {
+      setLoading(false)
     }
-
-    setIsAdmin(true)
-    fetchStats()
   }
 
   const fetchStats = async () => {
     const supabase = getSupabaseClient()
     
     try {
-      // Get total users
-      const { count: usersCount } = await supabase
+      // Get total users count
+      const { count: usersCount, error: usersError } = await supabase
         .from('profiles')
         .select('*', { count: 'exact', head: true })
 
-      // Get total balance
-      const { data: accounts } = await supabase
+      if (usersError) throw usersError
+
+      // Get total balance from all accounts
+      const { data: accounts, error: accountsError } = await supabase
         .from('accounts')
         .select('balance')
       
-      // Fixed: Added proper types to the reduce function
-      const totalBalance = accounts?.reduce(
-        (sum: number, acc: Account) => sum + (acc.balance || 0), 
-        0
-      ) || 0
+      if (accountsError) throw accountsError
+      
+      const totalBalance = accounts?.reduce((sum, acc) => sum + (acc.balance || 0), 0) || 0
 
-      // Get total transactions
-      const { count: transactionsCount } = await supabase
+      // Get total transactions count
+      const { count: transactionsCount, error: transError } = await supabase
         .from('transactions')
         .select('*', { count: 'exact', head: true })
+
+      if (transError) throw transError
 
       setStats({
         totalUsers: usersCount || 0,
         totalBalance: totalBalance,
         totalTransactions: transactionsCount || 0,
-        activeUsers: usersCount || 0, // Simplified for demo
+        activeUsers: usersCount || 0,
       })
-    } catch (error) {
+    } catch (error: any) {
       console.error('Failed to fetch stats:', error)
+      toast.error('Failed to load dashboard data')
     } finally {
       setLoading(false)
     }
@@ -167,9 +187,17 @@ export default function AdminPage() {
           </CardHeader>
           <CardContent>
             <p className="text-slate-500 text-sm">
-              This is a demo fintech platform. In production, this dashboard would show real-time analytics,
+              This is a BonaPay platform. In production, this dashboard would show real-time analytics,
               user activity logs, fraud detection alerts, and system health metrics.
             </p>
+            <div className="mt-4 p-4 bg-slate-50 dark:bg-slate-800 rounded-lg">
+              <h3 className="font-semibold mb-2">Quick Stats:</h3>
+              <ul className="space-y-1 text-sm text-slate-600 dark:text-slate-400">
+                <li>• Total Users: {stats.totalUsers}</li>
+                <li>• Total Platform Balance: {formatCurrency(stats.totalBalance)}</li>
+                <li>• Total Transactions: {stats.totalTransactions}</li>
+              </ul>
+            </div>
           </CardContent>
         </Card>
       </div>

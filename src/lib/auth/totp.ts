@@ -10,8 +10,8 @@ interface TOTPConfig {
 
 export function createAuthenticator(config?: Partial<TOTPConfig>) {
   const defaultConfig = {
-    issuer: 'FintechFlow',
-    label: 'FintechFlow',
+    issuer: 'BonaPay',
+    label: 'BonaPay',
     algorithm: 'SHA1',
     digits: 6,
     period: 30,
