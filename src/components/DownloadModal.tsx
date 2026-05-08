@@ -27,7 +27,7 @@ interface DownloadModalProps {
 }
 
 const APK_DOWNLOAD_URL =
-  'https://github.com/Lordcay-Concept/bonapay-app/releases/download/v1.0.0/BonaPay-v1.0.0.apk'
+  'https://github.com/Lordcay-Concept/bonapay-app/releases/download/v1.0.0/BonaPay.apk'
 
 export function DownloadModal({ isOpen, onClose, message }: DownloadModalProps) {
   const [copied, setCopied] = useState(false)
